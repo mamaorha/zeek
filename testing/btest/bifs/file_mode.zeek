@@ -1,6 +1,6 @@
 #
 # @TEST-EXEC: zeek -b %INPUT >out
-# @TEST-EXEC: btest-diff out
+# @TEST-EXEC: if is-windows; then cp out out_windows && btest-diff out_windows; else btest-diff out; fi
 
 event zeek_init()
 	{
