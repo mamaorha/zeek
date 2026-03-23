@@ -7,6 +7,9 @@
 #include <dlfcn.h>
 #include <glob.h>
 #endif
+#ifdef _MSC_VER
+#include <windows.h>
+#endif
 #include <sys/stat.h>
 #include <cerrno>
 #include <cstdlib>
@@ -226,22 +229,6 @@ zeek::expected<Plugin*, std::string> Manager::LoadDynamicPlugin(const std::strin
 
 bool Manager::ActivateDynamicPluginInternal(const std::string& name, bool ok_if_not_found,
                                             std::vector<std::string>* errors) {
-// Loading dynamic plugins is not currently supported on Windows platform.
-// Still check for static built-in plugins, though.
-#ifdef _MSC_VER
-    if ( ok_if_not_found )
-        return true;
-
-    plugin_list* all_plugins_win = Manager::ActivePluginsInternal();
-
-    for ( const auto& p : *all_plugins_win ) {
-        if ( p->Name() == name )
-            return true;
-    }
-
-    errors->emplace_back(util::fmt("plugin %s is not available", name.c_str()));
-    return false;
-#else
     errors->clear(); // caller should pass it in empty, but just to be sure
 
     dynamic_plugin_map::iterator m = dynamic_plugins.find(util::strtolower(name));
@@ -294,6 +281,79 @@ bool Manager::ActivateDynamicPluginInternal(const std::string& name, bool ok_if_
 
     DBG_LOG(DBG_PLUGINS, "  Searching for shared libraries %s", dypattern.c_str());
 
+#ifdef _MSC_VER
+    // On Windows, use std::filesystem to find matching plugin DLLs
+    // since glob() is not available, and LoadLibrary instead of dlopen.
+    {
+        std::string suffix = std::string(".") + HOST_ARCHITECTURE + DYNAMIC_PLUGIN_SUFFIX;
+        std::string lib_dir = dir + "lib";
+        bool found_libs = false;
+
+        std::error_code ec;
+        if ( std::filesystem::is_directory(lib_dir, ec) ) {
+            for ( const auto& entry : std::filesystem::directory_iterator(lib_dir, ec) ) {
+                if ( ! entry.is_regular_file() )
+                    continue;
+
+                auto fname = entry.path().filename().string();
+                if ( fname.size() >= suffix.size() &&
+                     fname.compare(fname.size() - suffix.size(), suffix.size(), suffix) == 0 ) {
+                    found_libs = true;
+                    auto path_str = entry.path().string();
+                    const char* path = path_str.c_str();
+
+                    current_plugin = nullptr;
+                    current_dir = dir.c_str();
+                    current_sopath = path;
+                    HMODULE hdl = LoadLibraryA(path);
+                    current_dir = nullptr;
+                    current_sopath = nullptr;
+
+                    if ( ! hdl ) {
+                        DWORD err_code = GetLastError();
+                        char buf[512] = {};
+                        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, err_code, 0,
+                                       buf, sizeof(buf), nullptr);
+                        errors->emplace_back(
+                            util::fmt("cannot load plugin library %s: %s (error %lu)", path, buf, err_code));
+                        continue;
+                    }
+
+                    if ( ! current_plugin ) {
+                        errors->emplace_back(util::fmt("load plugin library %s did not instantiate a plugin", path));
+                        FreeLibrary(hdl);
+                        continue;
+                    }
+
+                    current_plugin->SetDynamic(true);
+                    current_plugin->DoConfigure();
+                    DBG_LOG(DBG_PLUGINS, "  InitializingComponents");
+                    current_plugin->InitializeComponents();
+
+                    plugins_by_path.insert(std::make_pair(util::detail::normalize_path(dir), current_plugin));
+
+                    current_plugin->InitPreScript();
+
+                    if ( util::strtolower(current_plugin->Name()) != util::strtolower(name) ) {
+                        errors->emplace_back(util::fmt("inconsistent plugin name: %s vs %s",
+                                                       current_plugin->Name().c_str(), name.c_str()));
+                        FreeLibrary(hdl);
+                        continue;
+                    }
+
+                    current_plugin = nullptr;
+                    DBG_LOG(DBG_PLUGINS, "  Loaded %s", path);
+                }
+            }
+        }
+
+        if ( ! found_libs )
+            DBG_LOG(DBG_PLUGINS, "  No shared library found");
+
+        if ( ! errors->empty() )
+            return false;
+    }
+#else
     glob_t gl;
 
     if ( glob(dypattern.c_str(), 0, nullptr, &gl) == 0 ) {
@@ -330,6 +390,7 @@ bool Manager::ActivateDynamicPluginInternal(const std::string& name, bool ok_if_
     else {
         DBG_LOG(DBG_PLUGINS, "  No shared library found");
     }
+#endif
 
     // Add the "scripts" and "bif" directories to ZEEKPATH.
     std::string scripts = dir + "scripts";
@@ -368,7 +429,6 @@ bool Manager::ActivateDynamicPluginInternal(const std::string& name, bool ok_if_
     m->second.clear();
 
     return true;
-#endif
 }
 
 void Manager::ActivateDynamicPlugin(const std::string& name) {

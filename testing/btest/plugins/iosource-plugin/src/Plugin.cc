@@ -1,9 +1,7 @@
 
 #include "Plugin.h"
 
-namespace zeek::run_state {
-extern double processing_start_time;
-}
+#include "zeek/RunState.h"
 
 namespace btest::plugin::Demo_Iosource {
 Plugin plugin;
@@ -24,7 +22,7 @@ zeek::plugin::Configuration Plugin::Configure() {
 }
 
 void Plugin::InitPostScript() {
-    std::fprintf(stdout, "%.6f InitPostScript\n", zeek::run_state::network_time);
+    std::fprintf(stdout, "%.6f InitPostScript\n", zeek::run_state::network_time); std::fflush(stdout);
     ts1 = new TimeoutSource("timeout-source-1");
     ts2 = new TimeoutSource("timeout-source-2");
     fd1 = new FdSource("fd-source-1");
@@ -36,25 +34,25 @@ void Plugin::HookDrainEvents() {
     if ( zeek::run_state::processing_start_time != 0.0 ) // ignore drains from dispatch_packet
         return;
     //
-    std::fprintf(stdout, "%.6f HookDrainEvents %d\n", zeek::run_state::network_time, round);
+    std::fprintf(stdout, "%.6f HookDrainEvents %d\n", zeek::run_state::network_time, round); std::fflush(stdout);
 
     if ( (round % 9) == 0 ) {
-        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, ts1->Tag());
+        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, ts1->Tag()); std::fflush(stdout);
         ts1->Fire();
     }
 
     if ( (round % 19) == 0 ) {
-        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, ts2->Tag());
+        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, ts2->Tag()); std::fflush(stdout);
         ts2->Fire();
     }
 
     if ( (round % 19) == 0 ) {
-        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, fd1->Tag());
+        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, fd1->Tag()); std::fflush(stdout);
         fd1->Fire();
     }
 
     if ( (round % 23) == 0 ) {
-        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, fd2->Tag());
+        std::fprintf(stdout, "%.6f   Firing %s\n", zeek::run_state::network_time, fd2->Tag()); std::fflush(stdout);
         fd2->Fire();
     }
 }

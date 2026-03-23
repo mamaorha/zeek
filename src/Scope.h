@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "zeek/zeek-config.h"
 #include <map>
 #include <string>
 #include <string_view>
@@ -95,7 +96,7 @@ extern ScopePtr current_scope();
 extern ScopePtr global_scope();
 
 // Current module (identified by its name).
-extern std::string current_module;
+ZEEK_EXTERN_DATA std::string current_module;
 
 } // namespace detail
 } // namespace zeek
